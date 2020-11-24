@@ -42,6 +42,7 @@ class TicketSystem
   // Initialize the ticket system
   constructor (processes: set<Process>)
     ensures Valid()  // Postcondition
+    ensures P == processes  // Connection between processes and ts.P
   {
     P := processes;
     ticket, serving := 0, 0;  // Alt. ticket := serving;
@@ -93,5 +94,27 @@ class TicketSystem
     ensures p == q
   {
     
+  }
+}
+
+/*
+ * Event scheduler
+ * Part 6 in the paper
+ */
+method Run(processes: set<Process>)
+  requires processes != {}  // Cannot schedule no processes
+  decreases *  // Needed so that the loop omits termination checks
+{
+  var ts := new TicketSystem(processes);
+  while true
+    invariant ts.Valid()
+    decreases *  // Omits termination checks
+  {
+    var p :| p in ts.P;  // p exists such that p is in ts.P
+    match ts.cs[p] {
+      case Thinking => ts.Request(p);
+      case Hungry => ts.Enter(p);
+      case Eating => ts.Leave(p);
+    }
   }
 }
