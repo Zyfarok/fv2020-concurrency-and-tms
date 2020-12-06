@@ -21,7 +21,7 @@ module ModelingTM {
         //      - tx.ops.size() represents tryCommit operation.
         //      - -1 represents abort operation
         //      - values in between represent read and write operations
-        var currentOp: nat
+        var currentOp: int
         // sub-operations of the operation, see the step function
         var currentSubOp: nat
 
@@ -44,47 +44,34 @@ module ModelingTM {
         // Ordered list of transaction that each process should process
         const txQueues : map<ProcessId, seq<Transaction>>
         // State and memory of processes
-        const procStates : map<ProcessId, ProcessState>
+        var procStates : map<ProcessId, ProcessState>
         // Value of object (not actually necessary for the proofs)
         var objValues: map<MemoryObject, MemoryObjectValue>
         // Object lock.
-        var objLocks: map<MemoryObject, bool>
+        var lockedObjs: set<MemoryObject>
         // Object timestamp. (Incremented at the end of any write transaction)
         var objTimeStamps: map<MemoryObject, nat>
 
         constructor (q: map<ProcessId, seq<Transaction>>) {
-            procs := q.Keys;
             txQueues := q;
-            procStates := map p: ProcessId | p in q :: new ProcessState(); // ???
-            objValues := map o: MemoryObject | (
-                exists p :: p in q && (
-                    exists tx :: tx in q[p] && (
-                        exists op :: op in tx.ops && op.memObject == o
-                    )
-                )
-            ) :: 0;
-            objLocks := map o: MemoryObject | (
-                exists p :: p in q && (
-                    exists tx :: tx in q[p] && (
-                        exists op :: op in tx.ops && op.memObject == o
-                    )
-                )
-            ) :: false;
-            objTimeStamps := map o: MemoryObject | (
-                exists p :: p in q && (
-                    exists tx :: tx in q[p] && (
-                        exists op :: op in tx.ops && op.memObject == o
-                    )
-                )
-            ) :: 0;
+            var temp : map<ProcessId, ProcessState>  := map[];
+            procStates := map[];
+            objValues := map[];
+            lockedObjs := {};
+            objTimeStamps := map[];
         }
 
-        method Step(p: ProcessId)
-            requires p in procs // Replace with 
+        method Step(p: ProcessId, state: ProcessState)
+            requires p in txQueues
+            requires p in procStates && procStates[p] == state
             modifies this
+            modifies state
         {
             var txs := txQueues[p];
-            var state := procStates[p];
+            if(!(p in procStates)) {
+                var newState :=  new ProcessState();
+                procStates := procStates[p := newState];
+            }
             if (state.currentTx >= |txs|) {
                 // Nothing left to do.
                 return;
@@ -104,7 +91,7 @@ module ModelingTM {
                     state.currentSubOp := state.currentSubOp + 1;
                 } else if (state.currentSubOp == 1) {
                     // Check locks
-                    if !(forall o :: o in state.readSet ==> o in state.writeSet || !objLocks[o]) {
+                    if !(forall o :: o in state.readSet ==> o in state.writeSet || o !in lockedObjs) {
                         // Write detected (locked), aborting.
                         state.currentOp := -1;
                         state.currentSubOp := 0;
@@ -120,8 +107,7 @@ module ModelingTM {
                     state.currentSubOp := state.currentSubOp + 1;
                 } else if (state.currentSubOp == 3) {
                     // Release locks
-                    objLocks := map o | o in objLocks ::
-                        if(o in state.writeSet) then false else objLocks[o];
+                    lockedObjs := lockedObjs - state.writeSet.Keys;
                     state.writeSet := map[];
                     state.readSet := map[];
                     // Commited. Continue to next transaction.
@@ -145,8 +131,7 @@ module ModelingTM {
                     state.currentSubOp := state.currentSubOp + 1;
                 } else if (state.currentSubOp == 2) {
                     // Release locks
-                    objLocks := map o | o in objLocks ::
-                        if(o in state.writeSet) then false else objLocks[o];
+                    lockedObjs := lockedObjs - state.writeSet.Keys;
                     state.writeSet := map[];
                     state.readSet := map[];
                     // Restart transaction.
@@ -154,21 +139,31 @@ module ModelingTM {
                     state.currentSubOp := 0;
                 }
             } else {
+                assert state.currentOp >= 0 && state.currentOp < |tx.ops|;
                 var op := tx.ops[state.currentOp];
                 var o := op.memObject;
+                
+                // Init values
+                if(o !in objValues) {
+                    objValues := objValues[o := 0];
+                }
+                if(o !in objTimeStamps) {
+                    objTimeStamps := objTimeStamps[o := 0];
+                }
+
                 if(op.isWrite) {
                     // Write
                     if(state.currentSubOp == 0) {
                         if(!(op.memObject in state.writeSet)) {
                             // trylock
-                            if(objLocks[o]) {
+                            if(o in lockedObjs) {
                                 // Failed locking, aborting.
                                 state.currentOp := -1;
                                 state.currentSubOp := 0;
                                 return;
                             } else {
                                 // Aquire lock. Continue to next sub-op.
-                                objLocks := objLocks[o := true];
+                                lockedObjs := lockedObjs + {o};
                                 state.writeSet := state.writeSet[o := objValues[o]];
                             }
                         }
@@ -192,7 +187,7 @@ module ModelingTM {
                         state.readSet := state.readSet[o := objTimeStamps[o]];
                         state.currentSubOp := state.currentSubOp + 1;
                     } else if (state.currentSubOp == 1) {
-                        if(objLocks[o]) {
+                        if(o in lockedObjs) {
                             // Object is locked, aborting.
                             state.currentOp := -1;
                             state.currentSubOp := 0;
