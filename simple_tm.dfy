@@ -326,9 +326,9 @@ module ModelingTM {
         if (state.currentOp == |tx.ops|) {
             // tryCommit
             if(state.currentSubOp == 0) {
-                // Validate timestamps
-                if !(forall o :: o in state.readSet ==> state.readSet[o] == system.objTimeStamps[o]) {
-                    // Write detected (timestamp changed), aborting.
+                // Check locks
+                if !(forall o :: o in state.readSet ==> o in state.writeSet || o !in system.lockedObjs) {
+                    // Write detected (locked), aborting.
                     state := new ProcessState.abortTx(state);
                     system := new TMSystem.updateState(system, pid, state);
                     assume(system.validSystem()); // TODO : Remove assumption.
@@ -337,9 +337,9 @@ module ModelingTM {
                 // Continue to next sub-op.
                 state := new ProcessState.nextSubOp(state);
             } else if (state.currentSubOp == 1) {
-                // Check locks
-                if !(forall o :: o in state.readSet ==> o in state.writeSet || o !in system.lockedObjs) {
-                    // Write detected (locked), aborting.
+                // Validate timestamps
+                if !(forall o :: o in state.readSet ==> state.readSet[o] == system.objTimeStamps[o]) {
+                    // Write detected (timestamp changed), aborting.
                     state := new ProcessState.abortTx(state);
                     system := new TMSystem.updateState(system, pid, state);
                     assume(system.validSystem()); // TODO : Remove assumption.
