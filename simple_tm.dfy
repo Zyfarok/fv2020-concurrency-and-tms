@@ -1,7 +1,6 @@
 module ModelingTM {
     type ProcessId = nat
     type MemoryObject = nat
-    type MemoryObjectValue = nat
     type TimeStamp = nat
 
     class Operation {
@@ -27,15 +26,15 @@ module ModelingTM {
 
         // Set of read objects with original observed timestamp.
         const readSet: map<MemoryObject, TimeStamp>
-        // Set of read objects with original observed value.
-        const writeSet: map<MemoryObject, MemoryObjectValue>
+        // Set of written objects.
+        const writeSet: set<MemoryObject>
 
         constructor () {
             currentTx := 0;
             currentOp := 0;
             currentSubOp := 0;
             readSet := map[];
-            writeSet := map[];
+            writeSet := {};
         }
 
         constructor nextSubOp(that: ProcessState)
@@ -85,13 +84,13 @@ module ModelingTM {
             ensures this.currentOp == 0
             ensures this.currentSubOp == 0
             ensures this.readSet == map[]
-            ensures this.writeSet == map[]
+            ensures this.writeSet == {}
         {
             currentTx := that.currentTx;
             currentOp := 0;
             currentSubOp := 0;
             readSet := map[];
-            writeSet := map[];
+            writeSet := {};
         }
 
         constructor nextTx(that: ProcessState)
@@ -99,13 +98,13 @@ module ModelingTM {
             ensures this.currentOp == 0
             ensures this.currentSubOp == 0
             ensures this.readSet == map[]
-            ensures this.writeSet == map[]
+            ensures this.writeSet == {}
         {
             currentTx := that.currentTx + 1;
             currentOp := 0;
             currentSubOp := 0;
             readSet := map[];
-            writeSet := map[];
+            writeSet := {};
         }
 
         constructor addToReadSet(that: ProcessState, obj: MemoryObject, ts: TimeStamp)
@@ -124,20 +123,18 @@ module ModelingTM {
             writeSet := that.writeSet;
         }
 
-        constructor addToWriteSet(that: ProcessState, obj: MemoryObject, v: MemoryObjectValue)
+        constructor addToWriteSet(that: ProcessState, obj: MemoryObject)
             ensures this.currentTx == that.currentTx
             ensures this.currentOp == that.currentOp
             ensures this.currentSubOp == that.currentSubOp
             ensures this.readSet == that.readSet
-            ensures this.writeSet.Keys == that.writeSet.Keys + {obj}
-                && this.writeSet[obj] == v
-                && forall o :: o in writeSet && o != obj ==> writeSet[o] == that.writeSet[o]
+            ensures this.writeSet == that.writeSet + {obj}
         {
             currentTx := that.currentTx;
             currentOp := that.currentOp;
             currentSubOp := that.currentSubOp;
             readSet := that.readSet;
-            writeSet := that.writeSet[obj := v];
+            writeSet := that.writeSet + {obj};
         }
     }
 
@@ -146,8 +143,8 @@ module ModelingTM {
         const txQueues : map<ProcessId, seq<Transaction>>
         // State and memory of processes
         const procStates : map<ProcessId, ProcessState>
-        // Value of object (not actually necessary for the proofs)
-        const objValues: map<MemoryObject, MemoryObjectValue>
+        // Dirty objects. (Replaces the object value in a real representation. Used for safety proof)
+        const dirtyObjs: set<MemoryObject>
         // Object lock.
         const lockedObjs: set<MemoryObject>
         // Object timestamp. (Incremented at the end of any write transaction)
@@ -156,17 +153,15 @@ module ModelingTM {
         constructor (q: map<ProcessId, seq<Transaction>>) {
             txQueues := q;
             procStates := map[];
-            objValues := map[];
+            dirtyObjs := {};
             lockedObjs := {};
             objTimeStamps := map[];
         }
 
-        constructor initValue(that: TMSystem, obj: MemoryObject)
+        constructor initTimestamp(that: TMSystem, obj: MemoryObject)
             ensures txQueues == that.txQueues
             ensures procStates == that.procStates
-            ensures objValues.Keys == that.objValues.Keys + {obj}
-                && objValues[obj] == 0
-                && forall o :: o in objValues && o != obj ==> objValues[o] == that.objValues[o]
+            ensures dirtyObjs == that.dirtyObjs
             ensures lockedObjs == that.lockedObjs
             ensures objTimeStamps.Keys ==  that.objTimeStamps.Keys + {obj}
                 && objTimeStamps[obj] == 0
@@ -174,7 +169,7 @@ module ModelingTM {
         {
             txQueues := that.txQueues;
             procStates := that.procStates;
-            objValues := that.objValues[obj := 0];
+            dirtyObjs := that.dirtyObjs;
             lockedObjs := that.lockedObjs;
             objTimeStamps := that.objTimeStamps[obj := 0];
         }
@@ -184,45 +179,41 @@ module ModelingTM {
             ensures procStates.Keys == that.procStates.Keys + {pid}
                 && procStates[pid] == state
                 && forall p :: p in procStates && p != pid ==> procStates[p] == that.procStates[p]
-            ensures objValues == that.objValues
+            ensures dirtyObjs == that.dirtyObjs
             ensures lockedObjs == that.lockedObjs
             ensures objTimeStamps ==  that.objTimeStamps
         {
             txQueues := that.txQueues;
             procStates := that.procStates[pid := state];
-            objValues := that.objValues;
+            dirtyObjs := that.dirtyObjs;
             lockedObjs := that.lockedObjs;
             objTimeStamps := that.objTimeStamps;
         }
         
-        constructor updateValue(that: TMSystem, obj: MemoryObject, v: MemoryObjectValue)
+        constructor markDirty(that: TMSystem, obj: MemoryObject)
             ensures txQueues == that.txQueues
             ensures procStates == that.procStates
-            ensures objValues.Keys == that.objValues.Keys + {obj}
-                && objValues[obj] == v
-                && forall o :: o in objValues && o != obj ==> objValues[o] == that.objValues[o]
+            ensures dirtyObjs == that.dirtyObjs + {obj}
             ensures lockedObjs == that.lockedObjs
             ensures objTimeStamps ==  that.objTimeStamps
         {
             txQueues := that.txQueues;
             procStates := that.procStates;
-            objValues := that.objValues[obj := v];
+            dirtyObjs := that.dirtyObjs + {obj};
             lockedObjs := that.lockedObjs;
             objTimeStamps := that.objTimeStamps;
         }
         
-        constructor restoreValues(that: TMSystem, original: map<MemoryObject, MemoryObjectValue>)
+        constructor clearDirty(that: TMSystem, writeSet: set<MemoryObject>)
             ensures txQueues == that.txQueues
             ensures procStates == that.procStates
-            ensures objValues.Keys == that.objValues.Keys
-                && forall o :: o in objValues ==>
-                    if(o in original) then objValues[o] == original[o] else objValues[o] == that.objValues[o]
+            ensures dirtyObjs == that.dirtyObjs - writeSet
             ensures lockedObjs == that.lockedObjs
             ensures objTimeStamps ==  that.objTimeStamps
         {
             txQueues := that.txQueues;
             procStates := that.procStates;
-            objValues := map o | o in that.objValues :: if (o in original) then original[o] else that.objValues[o];
+            dirtyObjs := that.dirtyObjs - writeSet;
             lockedObjs := that.lockedObjs;
             objTimeStamps := that.objTimeStamps;
         }
@@ -230,13 +221,13 @@ module ModelingTM {
         constructor acquireLock(that: TMSystem, o: MemoryObject)
             ensures txQueues == that.txQueues
             ensures procStates == that.procStates
-            ensures objValues == that.objValues
+            ensures dirtyObjs == that.dirtyObjs
             ensures lockedObjs == that.lockedObjs + {o}
             ensures objTimeStamps == that.objTimeStamps
         {
             txQueues := that.txQueues;
             procStates := that.procStates;
-            objValues := that.objValues;
+            dirtyObjs := that.dirtyObjs;
             lockedObjs := that.lockedObjs + {o};
             objTimeStamps := that.objTimeStamps;
         }
@@ -244,13 +235,13 @@ module ModelingTM {
         constructor releaseLocks(that: TMSystem, objs: set<MemoryObject>)
             ensures txQueues == that.txQueues
             ensures procStates == that.procStates
-            ensures objValues == that.objValues
+            ensures dirtyObjs == that.dirtyObjs
             ensures lockedObjs == that.lockedObjs - objs
             ensures objTimeStamps ==  that.objTimeStamps
         {
             txQueues := that.txQueues;
             procStates := that.procStates;
-            objValues := that.objValues;
+            dirtyObjs := that.dirtyObjs;
             lockedObjs := that.lockedObjs - objs;
             objTimeStamps := that.objTimeStamps;
         }
@@ -258,7 +249,7 @@ module ModelingTM {
         constructor updateTimestamps(that: TMSystem, objs: set<MemoryObject>)
             ensures txQueues == that.txQueues
             ensures procStates == that.procStates
-            ensures objValues == that.objValues
+            ensures dirtyObjs == that.dirtyObjs
             ensures lockedObjs == that.lockedObjs
             ensures objTimeStamps.Keys == that.objTimeStamps.Keys
                 && forall o :: o in that.objTimeStamps ==>
@@ -266,7 +257,7 @@ module ModelingTM {
         {
             txQueues := that.txQueues;
             procStates := that.procStates;
-            objValues := that.objValues;
+            dirtyObjs := that.dirtyObjs;
             lockedObjs := that.lockedObjs;
             objTimeStamps := map o | o in that.objTimeStamps ::
                 if(o in objs) then (that.objTimeStamps[o] + 1) else that.objTimeStamps[o];
@@ -300,16 +291,16 @@ module ModelingTM {
                         state.currentSubOp < 3
                     ) else false
                 )
-                && state.readSet.Keys <= objValues.Keys
-                && state.writeSet.Keys <= objValues.Keys
+                && state.readSet.Keys <= objTimeStamps.Keys
+                && state.writeSet <= dirtyObjs
             ) else false
         }
 
         predicate validSystem()
         {
             && procStates.Keys <= txQueues.Keys
-            && objValues.Keys == objTimeStamps.Keys
-            && lockedObjs <= objValues.Keys
+            && dirtyObjs <= objTimeStamps.Keys
+            && lockedObjs <= objTimeStamps.Keys
             && forall p, s :: p in procStates && s == procStates[p] ==> stateValid(p, s)
         }
     }
@@ -354,16 +345,19 @@ module ModelingTM {
                     assume(system.validSystem()); // TODO : Remove assumption.
                     return;
                 }
-                // Can commit ! Continue to next sub-op.
+                // Can (and will) commit !
+                // The writeset can now be read safely by others so we can remove the dirty mark.
+                system := new TMSystem.clearDirty(system, state.writeSet);
+                // Continue to next sub-op.
                 state := new ProcessState.nextSubOp(state);
             } else if (state.currentSubOp == 2) {
                 // Update timestamps
-                system := new TMSystem.updateTimestamps(system, state.writeSet.Keys);
+                system := new TMSystem.updateTimestamps(system, state.writeSet);
                 // Continue to next sub-op.
                 state := new ProcessState.nextSubOp(state);
             } else if (state.currentSubOp == 3) {
                 // Release locks
-                system := new TMSystem.releaseLocks(system, state.writeSet.Keys);
+                system := new TMSystem.releaseLocks(system, state.writeSet);
                 // Commited. Continue to next transaction.
                 state := new ProcessState.nextTx(state);
             } else {
@@ -373,18 +367,18 @@ module ModelingTM {
             // Abort
             if(state.currentSubOp == 0) {
                 assert(state.currentTx < |system.txQueues[pid]|);
-                // Restore written values
-                system := new TMSystem.restoreValues(system, state.writeSet);
+                // Restore written values (equivalent to removing dirty marks here).
+                system := new TMSystem.clearDirty(system, state.writeSet);
                 // Continue to next sub-op.
                 state := new ProcessState.nextSubOp(state);
             } else if (state.currentSubOp == 1) {
                 // Update timestamps
-                system := new TMSystem.updateTimestamps(system, state.writeSet.Keys);
+                system := new TMSystem.updateTimestamps(system, state.writeSet);
                 // Continue to next sub-op.
                 state := new ProcessState.nextSubOp(state);
             } else if (state.currentSubOp == 2) {
                 // Release locks
-                system := new TMSystem.releaseLocks(system, state.writeSet.Keys);
+                system := new TMSystem.releaseLocks(system, state.writeSet);
                 // Restart transaction.
                 state := new ProcessState.restartTx(state);
             } else {
@@ -395,11 +389,10 @@ module ModelingTM {
             var op := tx.ops[state.currentOp];
             var o := op.memObject;
             
-            // Init object value and timestamp if not present
-            if(o !in system.objValues || o !in system.objTimeStamps) {
-                system := new TMSystem.initValue(system, o);
+            // Init object timestamp if not present
+            if(o !in system.objTimeStamps) {
+                system := new TMSystem.initTimestamp(system, o);
             }
-            assert(o in system.objValues);
             assert(o in system.objTimeStamps);
 
             if(op.isWrite) {
@@ -412,10 +405,8 @@ module ModelingTM {
                             state := new ProcessState.abortTx(state);
                         } else {
                             // Aquire lock. Continue to next sub-op.
-                            assert(o in system.objValues);
                             system := new TMSystem.acquireLock(system, o);
-                            assert(o in system.objValues);
-                            state := new ProcessState.addToWriteSet(state, o, system.objValues[o]);
+                            state := new ProcessState.addToWriteSet(state, o);
                             state := new ProcessState.nextSubOp(state);
                         }
                     } else {
@@ -423,8 +414,8 @@ module ModelingTM {
                         state := new ProcessState.nextSubOp(state);
                     }
                 } else if (state.currentSubOp == 1) {
-                    // Do the write (simple increment). Continue to next op.
-                    system := new TMSystem.updateValue(system, o, system.objValues[o] + 1);
+                    // Do the write (equivalent to marking as dirty). Continue to next op.
+                    system := new TMSystem.markDirty(system, o);
                     state := new ProcessState.nextOp(state);
                 } else {
                     assert(false);
