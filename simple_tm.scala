@@ -2,47 +2,56 @@ import stainless.collection._
 import stainless.lang._
 import stainless.annotation._
 import stainless.equations._
-import java.sql.Time
 
 object TMSystem {
     type Process = BigInt
     type MemoryObject = BigInt
     type TimeStamp = BigInt
 
-    def isValidSet[K](keys: List[K]): Boolean = {
-        keys match {
-            case k :: ks => !ks.contains(k) && isValidSet(ks)
-            case Nil() => true
-        }
-    }
-
     case class LMap[K,V](keys: List[K], values: List[V]) {
-        require(isValidSet(keys) && keys.length == values.length)
+        require(ListOps.noDuplicate(keys) && keys.length == values.length)
 
         def +(t: (K,V)): LMap[K,V] = t match {
             case (k,v) => this.+(k,v)
         }
 
         def +(k: K, v: V): LMap[K,V] =
-            if(keys.contains(k))
+            if(keys.contains(k)) {
+                containsMeanValidIndex(keys, k)
+                updatedListHasSameSize(values, keys.indexOf(k), v)
                 LMap(keys, values.updated(keys.indexOf(k), v))
-            else
+            } else {
                 LMap(Cons(k, keys), Cons(v, values))
+            }
+
+        def containsMeanValidIndex(ks: List[K], k: K): Unit = {
+            require(ks.contains(k))
+            if(ks.head != k)
+                containsMeanValidIndex(ks.tail, k)
+        } ensuring { _ => ks.indexOf(k) < ks.length }
         
-        def map(f: (K,V) => (K,V)): LMap[K,V] = {
+        def updatedListHasSameSize(vs: List[V], index: BigInt, v: V): Unit = {
+            require(index >= 0 && index < vs.length)
+            if(index > 0)
+                updatedListHasSameSize(vs.tail, index - 1, v)
+        }.ensuring { _ => vs.updated(index, v).length == vs.length }
+        
+        def mapValues(f: (K,V) => V): LMap[K,V] = {
             (keys, values) match {
                 case (Cons(k, ks), Cons(v, vs)) => {
-                    val x = f(k, v)
-                    val xs = LMap(ks,vs).map(f)
-                    LMap(Cons(x._1, xs.keys), Cons(x._2, xs.values))
+                    val nv = f(k, v)
+                    val xs = LMap(ks,vs).mapValues(f)
+                    LMap(keys, Cons(nv, xs.values))
                 }
                 case (Nil(), Nil()) => this
             }
+        } ensuring {
+            res => res.keys == this.keys && res.values.length == this.values.length
         }
     }
 
     object LMap {
-        def emptyMap[A,B] = LMap(Nil[A](),Nil[B]())
+        def empty[A,B] = LMap(Nil[A](),Nil[B]())
     }
 
     sealed abstract class Operation {
@@ -71,13 +80,13 @@ object TMSystem {
             ProcessState(currentTx, currentOp + 1, 0, readSet, writeSet)
             
         def nextTx(): ProcessState =
-            ProcessState(currentTx + 1, 0, 0, LMap.emptyMap[MemoryObject, TimeStamp], Set())
+            ProcessState(currentTx + 1, 0, 0, LMap.empty[MemoryObject, TimeStamp], Set())
 
         def abortTx(): ProcessState =
             ProcessState(currentTx, -1, 0, readSet, writeSet)
 
         def restartTx(): ProcessState =
-            ProcessState(currentTx, 0, 0, LMap.emptyMap[MemoryObject, TimeStamp], Set())
+            ProcessState(currentTx, 0, 0, LMap.empty[MemoryObject, TimeStamp], Set())
 
         def addToReadSet(obj: MemoryObject, ts: TimeStamp): ProcessState =
             ProcessState(currentTx, currentOp, currentSubOp, readSet + (obj -> ts), writeSet)
@@ -86,7 +95,7 @@ object TMSystem {
             ProcessState(currentTx, currentOp, currentSubOp, readSet, writeSet + obj)
     }
 
-    val startProcess = ProcessState(0, 0, 0, LMap.emptyMap[MemoryObject, TimeStamp], Set())
+    val startProcess = ProcessState(0, 0, 0, LMap.empty[MemoryObject, TimeStamp], Set())
 
     case class SystemState(
         txQueues: LMap[Process, List[Transaction]],
@@ -111,13 +120,18 @@ object TMSystem {
             SystemState(txQueues, procStates, dirtyObjs, lockedObjs -- writeSet, objTimeStamps)
         
         def updateTimestamps(writeSet: Set[MemoryObject]): SystemState =
-            SystemState(txQueues, procStates, dirtyObjs, lockedObjs,
-                    objTimeStamps.map{case (o, ts) => if (writeSet.contains(o)) (o, ts + 1) else (o, ts)})
+            SystemState(txQueues, procStates, dirtyObjs, lockedObjs, tsUpdate(objTimeStamps, writeSet))
+                    
+    }
+
+    def tsUpdate(objTimeStamps: LMap[MemoryObject, TimeStamp], writeSet: Set[MemoryObject]) = {
+        objTimeStamps.mapValues{case (o, ts) => if(writeSet.contains(o)) ts + 1 else ts}
     }
 
     def startSystem(txQueues: LMap[Process, List[Transaction]]): SystemState = {
         var procStates = LMap(txQueues.keys, txQueues.values.map(_ => startProcess))
-        var objs = txQueues.values.flatMap(x => x).flatMap(tx => tx.ops).map(op => op.o).toSet.toList
+        var objs = txQueues.values.flatMap(txs => txs).flatMap(tx => tx.ops).map(op => op.o).toSet.toList
+        assert(ListOps.noDuplicate(objs))
         var objTimeStamps = LMap(objs, objs.map(_ => BigInt(0)))
         SystemState(txQueues, procStates, Set(), Set(), objTimeStamps)
     }
