@@ -79,84 +79,85 @@ object ListProofs {
     }
 }
 
+case class LMap[K,V](keys: List[K], values: List[V]) {
+    require(ListOps.noDuplicate(keys)) // keys is a set
+    require(keys.length == values.length) // each key has a value
+
+    def +(t: (K,V)): LMap[K,V] = t match {
+        case (k,v) => this.+(k,v)
+    }
+
+    def +(k: K, v: V): LMap[K,V] = {
+        decreases(length)
+        if(contains(k)) {
+            updated(k,v)
+        } else {
+            LMap(k :: keys, v :: values)
+        }
+    } ensuring {
+        res => forall((x: K) => res.contains(x) == (x == k) || this.contains(x))
+    }
+
+    def updated(k: K, v: V): LMap[K,V] = {
+        require(contains(k))
+        decreases(length)
+        val i = keys.indexOf(k)
+        ListProofs.containsMeanValidIndex(keys, k)
+        ListProofs.updatedListHasSameSize(values, i, v)
+        if(keys.head != k) {
+            assert(LMap(keys, values.updated(i, v)).tail == tail.updated(k,v))
+        }
+        ListProofs.updateValid(this.values, i, v, i)
+        LMap(keys, values.updated(i, v))
+    } ensuring {
+        res => forall((x: K) => res.contains(x) == this.contains(x))
+    }
+    
+    def apply(k: K): V = {
+        require(contains(k))
+        if(keys.head == k)
+            values.head
+        else
+            tail(k)
+    }
+
+    def contains(k: K): Boolean = keys.contains(k)
+
+    def contains(k: K, v: V): Boolean = contains(k) && this(k) == v
+
+    def length = keys.length
+
+    def isEmpty = keys.isEmpty
+
+    def nonEmpty = keys.nonEmpty
+
+    def tail: LMap[K,V] = {
+        require(keys.nonEmpty)
+        LMap(keys.tail, values.tail)
+    }
+    
+    def mapValues(f: (K,V) => V): LMap[K,V] = {
+        (keys, values) match {
+            case (k :: ks, v :: vs) => {
+                val nv = f(k, v)
+                val xs = LMap(ks,vs).mapValues(f)
+                LMap(keys, nv :: xs.values)
+            }
+            case (Nil(), Nil()) => this
+        }
+    } ensuring {
+        res => res.keys == this.keys && res.values.length == this.values.length
+    }
+}
+
+object LMap {
+    def empty[A,B] = LMap(Nil[A](),Nil[B]())
+}
+
 object TMSystem {
     type Process = BigInt
     type MemoryObject = BigInt
     type TimeStamp = BigInt
-
-    case class LMap[K,V](keys: List[K], values: List[V]) {
-        require(ListOps.noDuplicate(keys)) // keys is a set
-        require(keys.length == values.length) // each key has a value
-
-        def +(t: (K,V)): LMap[K,V] = t match {
-            case (k,v) => this.+(k,v)
-        }
-
-        def +(k: K, v: V): LMap[K,V] = {
-            decreases(keys.length)
-            if(contains(k)) {
-                updated(k,v)
-            } else {
-                LMap(k :: keys, v :: values)
-            }
-        } ensuring {
-            res => forall((x: K) => res.contains(x) == (x == k) || this.contains(x))
-        }
-
-        def updated(k: K, v: V): LMap[K,V] = {
-            require(contains(k))
-            val i = keys.indexOf(k)
-            ListProofs.containsMeanValidIndex(keys, k)
-            ListProofs.updatedListHasSameSize(values, i, v)
-            if(keys.head != k) {
-                assert(LMap(keys, values.updated(i, v)).tail == tail.updated(k,v))
-            }
-            ListProofs.updateValid(this.values, i, v, i)
-            LMap(keys, values.updated(i, v))
-        } ensuring {
-            res => forall((x: K) => res.contains(x) == this.contains(x))
-        }
-        
-        def apply(k: K): V = {
-            require(contains(k))
-            if(keys.head == k)
-                values.head
-            else
-                tail(k)
-        }
-
-        def contains(k: K): Boolean = keys.contains(k)
-
-        def contains(k: K, v: V): Boolean = contains(k) && this(k) == v
-
-        def length = keys.length
-
-        def isEmpty = keys.isEmpty
-
-        def nonEmpty = keys.nonEmpty
-
-        def tail: LMap[K,V] = {
-            require(keys.nonEmpty)
-            LMap(keys.tail, values.tail)
-        }
-        
-        def mapValues(f: (K,V) => V): LMap[K,V] = {
-            (keys, values) match {
-                case (k :: ks, v :: vs) => {
-                    val nv = f(k, v)
-                    val xs = LMap(ks,vs).mapValues(f)
-                    LMap(keys, nv :: xs.values)
-                }
-                case (Nil(), Nil()) => this
-            }
-        } ensuring {
-            res => res.keys == this.keys && res.values.length == this.values.length
-        }
-    }
-
-    object LMap {
-        def empty[A,B] = LMap(Nil[A](),Nil[B]())
-    }
 
     sealed abstract class Operation {
         def o: MemoryObject
