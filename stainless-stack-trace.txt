@@ -1,0 +1,13 @@
+inox.package$FatalError: No input program.
+	at inox.Reporter.onFatal(Reporter.scala:39)
+	at inox.Reporter.fatalError(Reporter.scala:50)
+	at inox.Reporter.fatalError(Reporter.scala:98)
+	at stainless.frontends.scalac.ScalaCompiler$.stainless$frontends$scalac$ScalaCompiler$$getFiles(ScalaCompiler.scala:177)
+	at stainless.frontends.scalac.ScalaCompiler$Factory$$anon$1.<init>(ScalaCompiler.scala:148)
+	at stainless.frontends.scalac.ScalaCompiler$Factory.apply(ScalaCompiler.scala:141)
+	at stainless.frontend.package$.build(package.scala:35)
+	at stainless.MainHelpers.newCompiler$1(MainHelpers.scala:169)
+	at stainless.MainHelpers.main(MainHelpers.scala:170)
+	at stainless.MainHelpers.main$(MainHelpers.scala:147)
+	at stainless.Main$.main(Main.scala:3)
+	at stainless.Main.main(Main.scala)
