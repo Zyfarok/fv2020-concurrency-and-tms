@@ -292,7 +292,7 @@ module ModelingTM {
                     ) else false
                 )
                 && state.readSet.Keys <= objTimeStamps.Keys
-                && state.writeSet <= dirtyObjs
+                && state.writeSet <= lockedObjs
             ) else false
         }
 
