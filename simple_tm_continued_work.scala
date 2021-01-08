@@ -312,6 +312,7 @@ object TMSystem {
             SystemState(txQueues, procStates, dirtyObjs, lockedObjs, nObjTimeStamps)
         }
 
+        // unused and may need some debugging
         def stateValid(proc: Process, state: ProcessState) : Boolean = {
             require(
                 (procStates.keys contains proc) && (state == procStates(proc))
@@ -350,17 +351,14 @@ object TMSystem {
             pid_in_tx && state_curr_lt_tx && state_status
         }
 
+        // unused and may need some debugging
         def validSystem(): Boolean = {
             var kys = procStates.keys
-            var stVal = true
-
-            // needed for validSystem to be correct but not possible with Stainless lists
-            // kys.foreach(p => stVal = stVal && stateValid(p, procStates(p))) 
 
             (procStates.keys.size <= txQueues.keys.size) &&
             (dirtyObjs.size <= objTimeStamps.keys.size) &&
-            (lockedObjs.size <= objTimeStamps.keys.size) // &&
-            // stVal
+            (lockedObjs.size <= objTimeStamps.keys.size) &&
+            kys.forall(p => stateValid(p, procStates(p)))
         }
     }
 
